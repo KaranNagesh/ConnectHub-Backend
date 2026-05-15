@@ -1,0 +1,10 @@
+.env
+**/.env
+**/target
+**/logs
+runtime-logs
+uploads
+scratch
+.idea
+*.iml
+*.log

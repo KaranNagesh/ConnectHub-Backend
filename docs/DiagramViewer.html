@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ConnectHub Diagram Viewer</title>
+    
+    <!-- Load marked.js for Markdown parsing -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    
+    <!-- Load Mermaid.js -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10.6.1/dist/mermaid.min.js"></script>
+    
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #fcfcfc;
+        }
+        
+        h1, h2, h3 { color: #2c3e50; }
+        
+        .nav {
+            position: sticky;
+            top: 0;
+            background: white;
+            padding: 15px 0;
+            border-bottom: 1px solid #ddd;
+            z-index: 100;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        
+        button {
+            padding: 8px 16px;
+            border: 1px solid #3498db;
+            background-color: white;
+            color: #3498db;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        
+        button:hover, button.active {
+            background-color: #3498db;
+            color: white;
+        }
+        
+        .content-section {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            margin-top: 20px;
+            display: none;
+        }
+        
+        .content-section.active {
+            display: block;
+        }
+
+        .mermaid {
+            display: flex;
+            justify-content: center;
+            margin: 30px 0;
+            background: #fdfdfd;
+            padding: 20px;
+            border: 1px solid #eee;
+            border-radius: 8px;
+        }
+
+        pre {
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            padding: 15px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>ConnectHub Architecture & Diagram Viewer</h1>
+    <p>💡 <i>Running entirely offline! All markdown files have been directly embedded into this HTML file to bypass local CORS security restrictions.</i></p>
+    
+    <div class="nav" id="navigation"></div>
+    <div id="viewer-container"></div>
+
+    <!-- EMBEDDED MARKDOWN CONTENT -->
+
+<script type="text/markdown" id="md-architecture">
+# ConnectHub Architecture Diagrams
+
+This document illustrates the high-level architecture of the ConnectHub microservices platform.
+
+## 1. System Service Architecture
+
+The following diagram illustrates how the 9 Spring Boot microservices communicate with each other, the Gateway, Discovery Server, databases, and external services.
+
+```mermaid
+graph TD
+    %% Clients
+    Browser["Browser / Mobile Client"]
+
+    %% Gateway & Registry
+    Gateway["API Gateway :8080<br>Rate Limiting, JWT Validation"]
+    Eureka["Service Registry :8761<br>Eureka"]
+
+    %% Databases & External
+    Redis[("Redis<br>Pub/Sub, TTL, Cache")]
+    S3[("AWS S3<br>File Storage")]
+    Kafka[("Apache Kafka<br>Event Bus")]
+
+    %% Services
+    subgraph Microservices
+        Auth["Auth Service :8081<br>Users, JWT"]
+        Room["Room Service :8082<br>Groups, Members"]
+        Message["Message Service :8083<br>Chats, Reactions"]
+        Media["Media Service :8084<br>File Uploads"]
+        Presence["Presence Service :8085<br>Online Status"]
+        Notification["Notification Service :8086<br>Emails, Alerts"]
+        WebSocket["WebSocket Service :8087<br>Real-time STOMP"]
+        Payment["Payment Service :8088<br>Subscriptions"]
+    end
+
+    %% Service DBs
+    DBAuth[("MySQL Auth")]
+    DBRoom[("MySQL Room")]
+    DBMsg[("MySQL Message")]
+    DBMedia[("MySQL Media")]
+    DBNotif[("MySQL Notification")]
+
+    %% Connections
+    Browser -->|HTTP/REST| Gateway
+    Browser -->|WebSocket/STOMP| Gateway
+    
+    Gateway -.->|Lookup| Eureka
+    Auth -.->|Register| Eureka
+    Room -.->|Register| Eureka
+    Message -.->|Register| Eureka
+    Media -.->|Register| Eureka
+    Presence -.->|Register| Eureka
+    Notification -.->|Register| Eureka
+    WebSocket -.->|Register| Eureka
+    Payment -.->|Register| Eureka
+
+    Gateway -->|/api/v1/auth/**| Auth
+    Gateway -->|/api/v1/rooms/**| Room
+    Gateway -->|/api/v1/messages/**| Message
+    Gateway -->|/api/v1/media/**| Media
+    Gateway -->|/api/v1/presence/**| Presence
+    Gateway -->|/api/v1/notifications/**| Notification
+    Gateway -->|/ws/**| WebSocket
+    Gateway -->|/api/v1/payments/**| Payment
+
+    %% Service to DB
+    Auth --> DBAuth
+    Room --> DBRoom
+    Message --> DBMsg
+    Media --> DBMedia
+    Media --> S3
+    Notification --> DBNotif
+
+    %% Redis Connections
+    Auth -->|OTP, Blacklist| Redis
+    Presence -->|Online Status| Redis
+    Notification -->|Sub: email:send| Redis
+    WebSocket -->|Pub/Sub chat:*| Redis
+    Gateway -->|Rate Limit| Redis
+
+    %% Kafka Connections
+    WebSocket -->|Produce persist msg| Kafka
+    Message -->|Consume persist msg| Kafka
+    Payment -->|Produce subscription ev| Kafka
+    Notification -->|Consume alerts| Kafka
+```
+
+## 2. Microservice Layered Architecture Pattern
+
+This diagram represents the typical internal pattern used across all ConnectHub services.
+
+```mermaid
+graph TD
+    Request[Incoming HTTP Request] --> Controller
+    
+    subgraph Spring Boot Application
+        Controller[Resource Layer / @RestController\nParses Request & Handles DTOs]
+        Service[Service Layer / @Service\nApplies Business Logic]
+        Repository[Repository Layer / @Repository\nSpring Data JPA Queries]
+        Entity[Entity / Domain Model\nRepresents DB Structure]
+    end
+    
+    Database[(MySQL Database)]
+    
+    Controller -->|DTO mapped to Entity/Params| Service
+    Service -->|Uses| Entity
+    Service -->|Calls| Repository
+    Repository -->|Performs CRUD| Database
+```
+
+## 3. WebSocket Multi-Instance Cross-Broadcast
+
+This architecture diagram demonstrates how messages efficiently reach all users even when WebSocket services scale horizontally.
+
+```mermaid
+graph LR
+    UserA((User A))
+    UserB((User B))
+    UserC((User C))
+
+    subgraph Service Instances
+        Instance1[WebSocket Service Instance 1]
+        Instance2[WebSocket Service Instance 2]
+        Instance3[WebSocket Service Instance 3]
+    end
+
+    RedisBroker[(Redis Server\nChannel: chat:messages)]
+
+    UserA -->|1. STOMP Send| Instance1
+    Instance1 -->|2. PUBLISH| RedisBroker
+    
+    RedisBroker -->|3. MESSAGE Event| Instance1
+    RedisBroker -->|3. MESSAGE Event| Instance2
+    RedisBroker -->|3. MESSAGE Event| Instance3
+
+    Instance2 -->|4. STOMP Receive| UserB
+    Instance3 -->|4. STOMP Receive| UserC
+```
+</script>
+
+<script type="text/markdown" id="md-entities">
+# ConnectHub Entity Relationship Diagrams
+
+Due to the microservice architecture, each service operates its own independent database schema. The following diagrams represent the entities and their logical relationships separated by their respective bounded contexts.
+
+## 1. Auth Service Database (`connecthub_auth`)
+
+Stores user credentials, profiling, and manages audit logs.
+
+```mermaid
+erDiagram
+    USERS {
+        BIGINT id PK
+        VARCHAR username UK
+        VARCHAR email UK
+        VARCHAR password
+        VARCHAR full_name
+        VARCHAR avatar_url
+        VARCHAR bio
+        VARCHAR role "USER, ADMIN"
+        BOOLEAN is_email_verified
+        BOOLEAN is_active
+        VARCHAR provider "LOCAL, GOOGLE, GITHUB"
+        TIMESTAMP created_at
+        TIMESTAMP updated_at
+    }
+
+    AUDIT_LOGS {
+        BIGINT id PK
+        BIGINT user_id FK "Logical link to USERS"
+        VARCHAR action
+        VARCHAR ip_address
+        VARCHAR user_agent
+        TIMESTAMP created_at
+    }
+    
+    USERS ||--o{ AUDIT_LOGS : "generates"
+```
+
+## 2. Room Service Database (`connecthub_room`)
+
+Handles groups, direct messages (DMs), and membership tracking.
+
+```mermaid
+erDiagram
+    ROOMS {
+        BIGINT id PK
+        VARCHAR name
+        VARCHAR description
+        VARCHAR banner_url
+        VARCHAR type "GROUP, DM"
+        BIGINT creator_id
+        BOOLEAN is_active
+        TIMESTAMP created_at
+        TIMESTAMP updated_at
+    }
+
+    ROOM_MEMBERS {
+        BIGINT id PK
+        BIGINT room_id FK
+        BIGINT user_id "Logical link to connecthub_auth.USERS"
+        VARCHAR role "ADMIN, MODERATOR, MEMBER"
+        TIMESTAMP joined_at
+        TIMESTAMP last_read_at "Used for read receipts"
+        BOOLEAN is_muted
+    }
+
+    ROOMS ||--|{ ROOM_MEMBERS : "contains"
+```
+
+## 3. Message Service Database (`connecthub_message`)
+
+Manages message history, pagination contexts, and emoji reactions.
+
+```mermaid
+erDiagram
+    MESSAGES {
+        VARCHAR id PK "UUID assigned by WebSocket Service"
+        BIGINT room_id "Logical link to ROOMS"
+        BIGINT sender_id "Logical link to USERS"
+        TEXT content
+        VARCHAR type "TEXT, IMAGE, FILE"
+        VARCHAR media_url
+        VARCHAR delivery_status "SENT, DELIVERED, READ"
+        BOOLEAN is_edited
+        TIMESTAMP edited_at
+        BOOLEAN is_deleted "Soft delete flag"
+        TIMESTAMP sent_at
+    }
+
+    MESSAGE_REACTIONS {
+        BIGINT id PK
+        VARCHAR message_id FK
+        BIGINT user_id "Logical link to USERS"
+        VARCHAR emoji "e.g., 👍, ❤️"
+        TIMESTAMP created_at
+    }
+
+    MESSAGES ||--o{ MESSAGE_REACTIONS : "receives"
+```
+
+## 4. Media & Notification Service Databases
+
+Databases tracking uploaded files and notification queues.
+
+```mermaid
+erDiagram
+    MEDIA_FILES {
+        BIGINT id PK
+        BIGINT uploader_id
+        VARCHAR file_name
+        VARCHAR file_type
+        BIGINT file_size
+        VARCHAR s3_url
+        VARCHAR thumbnail_url
+        TIMESTAMP uploaded_at
+    }
+    
+    NOTIFICATIONS {
+        BIGINT id PK
+        BIGINT user_id
+        VARCHAR title
+        TEXT body
+        VARCHAR type "IN_APP, EMAIL"
+        BOOLEAN is_read
+        TIMESTAMP created_at
+    }
+```
+</script>
+
+<script type="text/markdown" id="md-classes">
+# ConnectHub Class Diagrams
+
+These class diagrams represent the general structure of our REST services and the specific setup for our real-time WebSocket communication engine.
+
+## 1. Typical Microservice REST Structure
+
+This diagram outlines the typical Java class relationship for almost any domain in ConnectHub (using `auth-service` as the example).
+
+```mermaid
+classDiagram
+    class AuthResource {
+        +register(RegisterDto) ResponseEntity
+        +login(LoginDto) ResponseEntity
+        +verifyOtp(OtpVerifyDto) ResponseEntity
+        +getProfile(Long id) ResponseEntity
+    }
+
+    class AuthService {
+        <<interface>>
+        +registerUser(RegisterDto) User
+        +loginUser(LoginDto) JwtTokenPair
+        +verifyRegistrationOtp(String email, String otp) boolean
+    }
+
+    class AuthServiceImpl {
+        -UserRepository userRepository
+        -JwtProvider jwtProvider
+        -PasswordEncoder passwordEncoder
+        -RedisTemplate redisTemplate
+    }
+
+    class UserRepository {
+        <<interface>>
+        +findByEmail(String email) Optional~User~
+        +findByUsername(String username) Optional~User~
+    }
+
+    class User {
+        -Long id
+        -String username
+        -String email
+        -String password
+        -boolean isEmailVerified
+    }
+
+    class JwtProvider {
+        +generateAccessToken(User) String
+        +generateRefreshToken(User) String
+        +validateToken(String) boolean
+    }
+
+    AuthResource --> AuthService : "Injects"
+    AuthService <|-- AuthServiceImpl : "Implements"
+    AuthServiceImpl --> UserRepository : "Injects"
+    AuthServiceImpl --> JwtProvider : "Uses"
+    UserRepository --> User : "Returns"
+```
+
+## 2. WebSocket Real-Time Engine Details
+
+This outlines the WebSocket-Service structure displaying how the JWT Authentication, Presence tracking, and generic Chat handling intertwines.
+
+```mermaid
+classDiagram
+    class ChatWebSocketHandler {
+        <<Controller>>
+        -RedisMessagePublisher redisPublisher
+        -MessagePersistenceService persistenceService
+        +handleChat(ChatMessage p, Principal h)
+        +handleTyping(TypingEvent t, Principal h)
+        +handleReaction(ReactionEvent r, Principal h)
+    }
+
+    class JwtChannelInterceptor {
+        +preSend(Message msg, MessageChannel mc) Message
+        -validateAndExtractPrincipal(String header) StompPrincipal
+    }
+
+    class WebSocketEventListener {
+        -RedisTemplate redisTemplate
+        -PresenceClient presenceClient
+        +onConnect(SessionConnectedEvent e)
+        +onDisconnect(SessionDisconnectEvent e)
+    }
+
+    class RedisMessageSubscriber {
+        -SimpMessagingTemplate messagingTemplate
+        +onMessage(Message message, byte[] pattern)
+    }
+
+    class MessagePersistenceService {
+        -RestTemplate restTemplate
+        +persistMessage(ChatMessage msg) CompletableFuture
+    }
+
+    class StompPrincipal {
+        -String userId
+        -String username
+        +getName() String
+    }
+
+    JwtChannelInterceptor --> StompPrincipal : "Creates onCONNECT"
+    ChatWebSocketHandler --> MessagePersistenceService : "Calls async DB write"
+    ChatWebSocketHandler --> StompPrincipal : "Reads sender identity"
+    WebSocketEventListener --> StompPrincipal : "Extracts identity for online/offline event"
+    RedisMessageSubscriber ..> ChatWebSocketHandler : "Subscribes to same channels"
+```
+</script>
+
+<script type="text/markdown" id="md-auth-flows">
+# Authentication & User Flow Diagrams
+
+The diagrams below represent the standard sequence flows for user management processes happening via the ConnectHub Gateway.
+
+## 1. User Registration Flow
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Gateway as API Gateway
+    participant Auth as Auth-Service
+    participant Redis as Redis
+    participant Notif as Notification-Service
+    participant SMTP as SMTP Email Server
+
+    User->>Gateway: POST /api/v1/auth/register (UserDetails)
+    Gateway->>Auth: Forward Request
+
+    Auth->>Auth: Check email & username unique
+    Auth->>Auth: BCrypt hash password
+    Auth->>Auth: Save pending DB record (isEmailVerified=false)
+    Auth->>Auth: Generate 6-digit OTP
+
+    Auth->>Redis: SET otp:register:{email} (TTL 5 mins)
+    Auth->>Redis: SET otp:cooldown:register:{email} (TTL 60s)
+    
+    Auth->>Redis: PUBLISH email:send
+    Auth-->>Gateway: 201 Created (Verify Pending)
+    Gateway-->>User: 201 Created (Verify Pending)
+
+    Redis-->>Notif: trigger onMessage() (event: email:send)
+    Notif->>SMTP: Async Send OTP Email
+    SMTP-->>User: Email Delivered!
+
+    note over User, Auth: User submits OTP
+    User->>Gateway: POST /api/v1/auth/verify-registration-otp
+    Gateway->>Auth: Forward
+
+    Auth->>Redis: GET otp:register:{email}
+    Redis-->>Auth: return OTP
+
+    alt OTP Matches
+        Auth->>Auth: UPDATE DB (isEmailVerified=true)
+        Auth->>Auth: Generate JWT Access & Refresh Tokens
+        Auth-->>User: 200 OK + { accessToken, refreshToken }
+    else OTP Incorrect/Expired
+        Auth-->>User: 400 Bad Request
+    end
+```
+
+## 2. Login Flow with JWT & Filtering
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Gateway as API Gateway
+    participant JWT as JwtAuthenticationFilter
+    participant AuthLayer as Auth-Service
+    participant DB as User Database
+
+    User->>Gateway: POST /api/v1/auth/login
+    
+    note over Gateway, JWT: Gateway routes request bypassing JWT verification 
+    Gateway->>AuthLayer: Forward /login
+    
+    AuthLayer->>DB: findByEmail(email)
+    DB-->>AuthLayer: Returns encoded password
+    
+    AuthLayer->>AuthLayer: BCrypt.matches(raw, hash)
+    
+    alt Correct Password
+        AuthLayer->>AuthLayer: generate accessToken (24h)
+        AuthLayer->>AuthLayer: generate refreshToken (7d)
+        AuthLayer-->>User: 200 OK + { JWT }
+    else Incorrect Password
+        AuthLayer-->>User: 401 Unauthorized
+    end
+    
+    note over User, Gateway: Subsequence Authenticated Request
+    User->>Gateway: GET /api/v1/rooms/user/1 (Header: Bearer eyJh...)
+    
+    Gateway->>JWT: pre-filter check
+    JWT->>JWT: Validate Token Signature & Expiry
+    JWT->>Redis: Check Blacklist (token:blacklist:eyJh...)
+    Redis-->>JWT: Not Blacklisted
+    
+    JWT->>Gateway: Appends X-User-Id, X-User-Role headers
+    Gateway->>RoomService: GET /api/v1/rooms/user/1
+```
+
+## 3. Forgot Password Flow
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Auth as Auth-Service
+    participant Redis as Redis
+    participant Email as Notification-Service
+
+    User->>Auth: POST /forgot-password {email}
+    Auth->>Auth: find user (fail silently if not found)
+    
+    Auth->>Redis: SET otp:reset:{email} (TTL 10min)
+    Auth->>Redis: PUBLISH email:send 
+    Auth-->>User: 200 Code Sent
+    
+    Redis-->>Email: pub/sub hook
+    Email-->>User: OTP email delivered
+    
+    User->>Auth: POST /verify-reset-otp {email, OTP}
+    Auth->>Redis: verify OTP
+    Auth->>Auth: generate ResetToken (Purpose=PASSWORD_RESET, 15m)
+    Auth-->>User: 200 OK + { resetToken }
+    
+    User->>Auth: POST /reset-password {resetToken, newPass}
+    Auth->>Auth: validate Token & Purpose
+    Auth->>Auth: BCrypt hash newPass
+    Auth->>Redis: Invalidate existing sessions
+    Auth-->>User: 200 OK
+```
+</script>
+
+<script type="text/markdown" id="md-messaging-flows">
+# Messaging and Real-Time Event Sequence Diagrams
+
+These sequence diagrams display how STOMP Websockets, Redis Pub/Sub, and Async processing handle Chat functionality.
+
+## 1. Chat Message Sending (Real-Time Fast Path vs Slow Path)
+
+```mermaid
+sequenceDiagram
+    actor UserA as "Sender (User A)"
+    participant WS as WebSocket-Service
+    participant Redis as Redis Pub/Sub
+    participant Kafka as Kafka Broker
+    participant MessageSvc as Message-Service
+    actor UserB as "Receiver (User B)"
+
+    UserA->>WS: STOMP /app/chat.send {roomId, content}
+    
+    WS->>WS: Extract Sender ID & Username from JWT
+    WS->>WS: Generate UUID MessageID
+    WS->>WS: XSS sanitize content
+    WS->>WS: set deliveryStatus = SENT
+
+    par Real-Time Fast Path (~10ms)
+        WS->>Redis: PUBLISH chat:messages (Payload)
+        Redis-->>WS: (RedisSubscriber trigger)
+        WS-->>UserB: STOMP /topic/room/{id} (new message)
+        WS-->>UserA: STOMP /user/queue/messages (Confirmation)
+    and Async Persistence Path (Slow Path)
+        WS->>Kafka: Produce Event (topic: chat.messages.persist)
+        Kafka-->>MessageSvc: Consume via KafkaMessageListener
+        MessageSvc->>MessageSvc: Persist to MySQL DB
+    end
+```
+
+## 2. Typing Indicator Sequence
+
+Typing events are ephemeral and loss-tolerant, so they broadcast locally within the scope of the room without Redis Pub/Sub fanout.
+
+```mermaid
+sequenceDiagram
+    actor Typer as "User A"
+    participant WS as WebSocket-Service
+    actor Observer as "User B"
+
+    Typer->>WS: STOMP /app/chat.typing {roomId, typing: true}
+    WS-->>Observer: STOMP /topic/room/{id}/typing
+    
+    note over Observer: UI Shows "User A is typing..."
+    
+    note over Typer: (3 seconds of inactivity, or message sent)
+    
+    Typer->>WS: STOMP /app/chat.typing {roomId, typing: false}
+    WS-->>Observer: STOMP /topic/room/{id}/typing
+    
+    note over Observer: UI Hides typing indicator
+```
+
+## 3. Presence Tracking System Workflow
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Frontend
+    participant WS as WebSocket-Service
+    participant Presence as Presence-Service (REST)
+    participant Redis as Redis DB
+
+    note over User, Frontend: User Logs into Application
+    Frontend->>WS: STOMP CONNECT (Bearer Token)
+    
+    WS->>WS: validate JWT (JwtChannelInterceptor)
+    WS->>WS: Trigger onConnect Event
+    
+    WS->>Presence: POST /presence/online/{userId}
+    Presence->>Redis: SET presence:{userId} (5m TTL)
+    Presence->>Redis: SADD presence:online {userId}
+    
+    WS->>Redis: PUBLISH chat:presence {userId, ONLINE}
+    Redis-->>Frontend: Broadcast to all connected clients
+    
+    loop Every 60s
+        Frontend->>Presence: POST /presence/ping/{userId}
+        Presence->>Redis: Refresh presence TTL (5m)
+    end
+    
+    note over User, Frontend: User closes tab unexpectedly
+    loop Every 60s @Scheduled Task 
+        Presence->>Presence: Check stale pings
+        note over Presence: finds user hasn't pinged in 90s
+        Presence->>Redis: DEL presence:{userId}
+    end
+```
+
+## 4. Edit/Delete Distributed Workflow
+
+```mermaid
+sequenceDiagram
+    actor UserA
+    participant Gateway
+    participant MessageSvc as Message-Service(REST)
+    participant WS as WebSocket-Service
+    participant Redis as Redis Pub/Sub
+    actor UserB
+
+    UserA->>Gateway: PUT /api/v1/messages/{messageId} (New Content)
+    Gateway->>MessageSvc: Forward
+    MessageSvc->>MessageSvc: Update DB (isEdited=true, new content)
+    MessageSvc-->>UserA: 200 OK
+    
+    UserA->>WS: STOMP /app/chat.edit {roomId, messageId, newContent}
+    WS->>WS: Sanitize
+    WS->>Redis: PUBLISH chat:edits
+    
+    Redis-->>WS: (RedisSubscriber)
+    WS-->>UserB: STOMP /topic/room/{id}/edit
+    
+    note over UserB: UI updates the single message content in-place
+```
+</script>
+
+<script type="text/markdown" id="md-feature-flows">
+# ConnectHub Feature Flow Diagrams
+
+These flow diagrams represent the end-to-end functionality flows of the core microservice features inside the ConnectHub backend.
+
+## 1. Complete Registration and Authorization Flowchart
+
+```mermaid
+flowchart TD
+    %% Start
+    A((Start)) --> B[User visits /register]
+    
+    B --> C{Inputs valid?}
+    C -- No --> D[Return 400 Validation Error]
+    
+    C -- Yes --> E[Gateway filters & forwards to Auth-Service]
+    E --> F{Email/User Unique?}
+    
+    F -- No --> G[Return 409 Conflict]
+    
+    F -- Yes --> H[BCrypt hash Password]
+    H --> I["Save to auth_db DB\nisEmailVerified = false"]
+    I --> J[Generate 6-digit OTP]
+    J --> K[Store OTP in Redis\nTTL = 5 mins]
+    K --> L[Pub/Sub Notification-Service]
+    L --> M[Notification sends Email via SMTP]
+    
+    %% OTP input
+    M --> N[User submits OTP via /verify]
+    
+    N --> O{OTP Correct & Not Expired?}
+    O -- No --> P[Return 400 Bad Request]
+    
+    O -- Yes --> Q["Update auth_db DB\nisEmailVerified = true"]
+    Q --> R[Generate JWT Access & Refresh Tokens]
+    R --> S[Return 200 OK + JWT]
+    S --> T((End: Successfully Registered))
+```
+
+## 2. File Upload Flowchart
+
+```mermaid
+flowchart TD
+    Start((Start)) --> UploadBtn["User clicks Upload Media in Frontend"]
+    UploadBtn --> SendFile["Browser POST /api/v1/media/upload (Multipart)"]
+    
+    SendFile --> GW["API Gateway"]
+    GW --> JWT{"Valid JWT?"}
+    JWT -- No --> Error401["401 Unauthorized"]
+    
+    JWT -- Yes --> MediaSvc["Forward to Media-Service"]
+    
+    MediaSvc --> Validate{"Check Type/Size"}
+    Validate -- Invalid --> Error400["400 Bad Request"]
+    
+    Validate -- Valid --> S3["Upload File to AWS S3 & LocalStack"]
+    S3 --> S3Thumbs["Generate & Upload Thumbnail"]
+    
+    S3Thumbs --> DB["Save metadata to connecthub_media DB"]
+    DB --> GenerateURL["Generate pre-signed URL"]
+    
+    GenerateURL --> ReturnClient["Return 201 Created + URL to Frontend"]
+    
+    ReturnClient --> MsgGen["Frontend embeds URL in ChatMessage object"]
+    MsgGen --> SendSTOMP["Client triggers STOMP /app/chat.send"]
+    SendSTOMP --> End((End Broadcast))
+```
+
+## 3. Emoji Reactions Pipeline Flowchart
+
+```mermaid
+flowchart TD
+    Start((Start)) --> UI[User Clicks Emoji 👍 on Message M1]
+    
+    UI --> Optimistic[Frontend immediately displays +1]
+    
+    Optimistic --> REST[Frontend POST /messages/M1/reactions]
+    REST --> MsgDB[Message-Service Saves reaction to DB]
+    
+    Optimistic --> WS[Frontend STOMP /app/chat.react]
+    WS --> WSSvc[WebSocket Service receives frame]
+    
+    WSSvc --> Format[Format ReactionEvent with UserID]
+    Format --> Pub[Publish to Redis `chat:reactions`]
+    
+    Pub --> Sub1[Instance 1 Subscriber]
+    Pub --> Sub2[Instance 2 Subscriber]
+    
+    Sub1 --> ClientA[Broadcast to /topic/room/R1/reactions]
+    Sub2 --> ClientB[Broadcast to /topic/room/R1/reactions]
+    
+    ClientA --> Resolve[Frontend compares with optimistic guess]
+    ClientB --> End((End Broadcast))
+```
+</script>
+
+    <script>
+        const tabs = [
+            { id: 'architecture', title: 'Service Architecture' },
+            { id: 'entities', title: 'Database Entities' },
+            { id: 'classes', title: 'Class Structures' },
+            { id: 'auth-flows', title: 'Auth Workflows' },
+            { id: 'messaging-flows', title: 'Messaging & Presence' },
+            { id: 'feature-flows', title: 'End-to-End Features' }
+        ];
+
+        // Initialize mermaid with default config
+        mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'loose' });
+
+        const nav = document.getElementById('navigation');
+        const container = document.getElementById('viewer-container');
+
+        // Create Navigation Buttons and Content Containers
+        tabs.forEach((item) => {
+            const btn = document.createElement('button');
+            btn.textContent = item.title;
+            btn.onclick = () => loadTab(item.id);
+            btn.id = `btn-${item.id}`;
+            nav.appendChild(btn);
+
+            const section = document.createElement('div');
+            section.id = `content-${item.id}`;
+            section.className = 'content-section';
+            container.appendChild(section);
+        });
+
+        async function renderEmbeddedContent(id) {
+            const section = document.getElementById(`content-${id}`);
+            if (section.dataset.loaded) return; 
+
+            try {
+                // Get the literal markdown text from the <script> block
+                const text = document.getElementById(`md-${id}`).textContent.trim();
+                
+                // Parse markdown to HTML
+                section.innerHTML = marked.parse(text);
+                
+                // Find all markdown code blocks meant for Mermaid
+                const blocks = section.querySelectorAll('code.language-mermaid');
+                blocks.forEach(block => {
+                    const div = document.createElement('div');
+                    div.className = 'mermaid';
+                    div.textContent = block.textContent; // Retain diagram definition
+                    block.parentElement.replaceWith(div); 
+                });
+                
+                // Render the newfound Mermaid diagrams in this section
+                await mermaid.run({
+                    nodes: section.querySelectorAll('.mermaid')
+                });
+                
+                section.dataset.loaded = 'true';
+            } catch (err) {
+                console.error("Error rendering mermaid diagram", err);
+            }
+        }
+
+        function loadTab(id) {
+            document.querySelectorAll('.nav button').forEach(b => b.classList.remove('active'));
+            document.getElementById(`btn-${id}`).classList.add('active');
+            
+            document.querySelectorAll('.content-section').forEach(s => s.classList.remove('active'));
+            document.getElementById(`content-${id}`).classList.add('active');
+            
+            renderEmbeddedContent(id);
+        }
+
+        // Initialize First Document Tab automatically
+        loadTab(tabs[0].id);
+    </script>
+</body>
+</html>
