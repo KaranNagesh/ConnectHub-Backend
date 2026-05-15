@@ -16,6 +16,9 @@ import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
 import javax.crypto.SecretKey;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
 import java.util.List;
 
@@ -134,11 +137,10 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
             String token = authHeader.substring(7);
 
             /*
-             * Decode the Base64 secret and build an HMAC-SHA key to verify the JWT signature.
-             * If the JWT is expired, tampered, or signed with a different key, an exception
-             * is thrown and caught below, returning 401.
+             * Build the same HMAC-SHA key used by auth-service. The secret can be
+             * Base64 or plain text; short plain-text secrets are stretched to 256 bits.
              */
-            SecretKey key = Keys.hmacShaKeyFor(Base64.getDecoder().decode(jwtSecret));
+            SecretKey key = key();
             Claims claims = Jwts.parser().verifyWith(key).build().parseSignedClaims(token).getPayload();
 
             /*
@@ -224,4 +226,33 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
      */
     @Override
     public int getOrder() { return -1; }
+
+    private SecretKey key() {
+        byte[] secretBytes = decodeSecret();
+        if (secretBytes.length < 32) {
+            secretBytes = sha256(secretBytes);
+        }
+        return Keys.hmacShaKeyFor(secretBytes);
+    }
+
+    private byte[] decodeSecret() {
+        if (jwtSecret == null || jwtSecret.isBlank()) {
+            throw new IllegalStateException("JWT secret must not be blank");
+        }
+
+        String secret = jwtSecret.trim();
+        try {
+            return Base64.getDecoder().decode(secret);
+        } catch (IllegalArgumentException ex) {
+            return secret.getBytes(StandardCharsets.UTF_8);
+        }
+    }
+
+    private byte[] sha256(byte[] input) {
+        try {
+            return MessageDigest.getInstance("SHA-256").digest(input);
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 is not available", ex);
+        }
+    }
 }

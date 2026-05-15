@@ -14,6 +14,9 @@ import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
 import javax.crypto.SecretKey;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
 import java.util.Date;
 
@@ -36,7 +39,11 @@ class JwtAuthenticationFilterTest {
     }
 
     private String generateToken(String sub, String role, String tier) {
-        SecretKey key = Keys.hmacShaKeyFor(Base64.getDecoder().decode(rawSecret));
+        return generateToken(rawSecret, sub, role, tier);
+    }
+
+    private String generateToken(String secret, String sub, String role, String tier) {
+        SecretKey key = signingKey(secret);
         return Jwts.builder()
                 .subject(sub)
                 .claim("email", "test@test.com")
@@ -47,6 +54,23 @@ class JwtAuthenticationFilterTest {
                 .expiration(new Date(System.currentTimeMillis() + 100000))
                 .signWith(key)
                 .compact();
+    }
+
+    private SecretKey signingKey(String secret) {
+        byte[] secretBytes;
+        try {
+            secretBytes = Base64.getDecoder().decode(secret.trim());
+        } catch (IllegalArgumentException ex) {
+            secretBytes = secret.trim().getBytes(StandardCharsets.UTF_8);
+        }
+        if (secretBytes.length < 32) {
+            try {
+                secretBytes = MessageDigest.getInstance("SHA-256").digest(secretBytes);
+            } catch (NoSuchAlgorithmException ex) {
+                throw new IllegalStateException(ex);
+            }
+        }
+        return Keys.hmacShaKeyFor(secretBytes);
     }
 
     @Test
@@ -99,6 +123,20 @@ class JwtAuthenticationFilterTest {
                    "USER".equals(headers.getFirst("X-User-Role")) &&
                    "PRO".equals(headers.getFirst("X-Subscription-Tier"));
         }));
+    }
+
+    @Test
+    void filter_validTokenWithShortPlainTextSecret_forwards() {
+        ReflectionTestUtils.setField(filter, "jwtSecret", "secret");
+        String token = generateToken("secret", "123", "USER", "PRO");
+        MockServerHttpRequest request = MockServerHttpRequest.get("/api/v1/users/profile")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                .build();
+        MockServerWebExchange exchange = MockServerWebExchange.from(request);
+
+        filter.filter(exchange, chain).block();
+
+        verify(chain).filter(any());
     }
 
     @Test
