@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
+import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Date;
 import java.util.HashMap;
@@ -76,7 +77,13 @@ public class JwtUtil {
      * Called on every token operation; the key object is lightweight to create.
      */
     private SecretKey key() {
-        return Keys.hmacShaKeyFor(Base64.getDecoder().decode(jwtSecret));
+        byte[] secretBytes;
+        try {
+            secretBytes = Base64.getDecoder().decode(jwtSecret);
+        } catch (IllegalArgumentException ex) {
+            secretBytes = jwtSecret.getBytes(StandardCharsets.UTF_8);
+        }
+        return Keys.hmacShaKeyFor(secretBytes);
     }
 
     /**
