@@ -48,6 +48,10 @@ firebase:
   project-id: ${FIREBASE_PROJECT_ID:}
   client-email: ${FIREBASE_CLIENT_EMAIL:}
   private-key: ${FIREBASE_PRIVATE_KEY:}
+
+frontend:
+  url: ${FRONTEND_URL:http://conecthub-frontend.s3-website.ap-south-1.amazonaws.com}
+
 eureka:
   client:
     service-url:

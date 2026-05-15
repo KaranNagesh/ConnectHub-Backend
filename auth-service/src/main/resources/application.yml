@@ -54,13 +54,13 @@ spring:
             client-id: ${GOOGLE_CLIENT_ID}
             client-secret: ${GOOGLE_CLIENT_SECRET}
             scope: email, profile
-            redirect-uri: "${GATEWAY_URL:http://localhost:8080}/login/oauth2/code/{registrationId}"
+            redirect-uri: "${GATEWAY_URL:http://13.202.75.66:8080}/login/oauth2/code/{registrationId}"
 
           github:
             client-id: ${GITHUB_CLIENT_ID:}
             client-secret: ${GITHUB_CLIENT_SECRET:}
             scope: user:email, read:user
-            redirect-uri: "${GATEWAY_URL:http://localhost:8080}/login/oauth2/code/{registrationId}"
+            redirect-uri: "${GATEWAY_URL:http://13.202.75.66:8080}/login/oauth2/code/{registrationId}"
 
         provider:
           google:
@@ -89,7 +89,7 @@ jwt:
 
 oauth2:
   redirect:
-    frontend-url: ${FRONTEND_URL:http://localhost:4200}
+    frontend-url: ${FRONTEND_URL:http://conecthub-frontend.s3-website.ap-south-1.amazonaws.com}
 
 eureka:
   client:

@@ -54,6 +54,9 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     private final JwtChannelInterceptor jwtInterceptor;
 
+    private static final String PRODUCTION_FRONTEND_URL =
+            "http://conecthub-frontend.s3-website.ap-south-1.amazonaws.com";
+
     @org.springframework.beans.factory.annotation.Value("${FRONTEND_URL:http://localhost:4200}")
     private String frontendUrl;
 
@@ -81,7 +84,8 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         registry.addEndpoint("/ws")
-                .setAllowedOriginPatterns(frontendUrl, "http://localhost:4200", "http://127.0.0.1:4200",
+                .setAllowedOriginPatterns(frontendUrl, PRODUCTION_FRONTEND_URL,
+                        "http://localhost:4200", "http://127.0.0.1:4200",
                         "http://localhost:*", "http://127.0.0.1:*")
                 .withSockJS()
                 .setHeartbeatTime(25000).setDisconnectDelay(30000).setSessionCookieNeeded(false);
