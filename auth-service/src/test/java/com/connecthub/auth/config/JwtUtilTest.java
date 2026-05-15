@@ -52,4 +52,14 @@ class JwtUtilTest {
         assertTrue(jwtUtil.isValid(token));
         assertEquals(42, jwtUtil.getUserId(token));
     }
+
+    @Test
+    void generateAccessToken_acceptsShortPlainTextSecret() {
+        ReflectionTestUtils.setField(jwtUtil, "jwtSecret", "secret");
+
+        String token = jwtUtil.generateAccessToken(user);
+
+        assertTrue(jwtUtil.isValid(token));
+        assertEquals(42, jwtUtil.getUserId(token));
+    }
 }

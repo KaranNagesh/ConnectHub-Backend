@@ -8,6 +8,8 @@ import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
 import java.util.Date;
 import java.util.HashMap;
@@ -77,13 +79,34 @@ public class JwtUtil {
      * Called on every token operation; the key object is lightweight to create.
      */
     private SecretKey key() {
-        byte[] secretBytes;
-        try {
-            secretBytes = Base64.getDecoder().decode(jwtSecret);
-        } catch (IllegalArgumentException ex) {
-            secretBytes = jwtSecret.getBytes(StandardCharsets.UTF_8);
+        byte[] secretBytes = decodeSecret();
+        if (secretBytes.length < 32) {
+            secretBytes = sha256(secretBytes);
         }
         return Keys.hmacShaKeyFor(secretBytes);
+    }
+
+    private byte[] decodeSecret() {
+        if (jwtSecret == null || jwtSecret.isBlank()) {
+            throw new IllegalStateException("JWT secret must not be blank");
+        }
+
+        String secret = jwtSecret.trim();
+        byte[] secretBytes;
+        try {
+            secretBytes = Base64.getDecoder().decode(secret);
+        } catch (IllegalArgumentException ex) {
+            secretBytes = secret.getBytes(StandardCharsets.UTF_8);
+        }
+        return secretBytes;
+    }
+
+    private byte[] sha256(byte[] input) {
+        try {
+            return MessageDigest.getInstance("SHA-256").digest(input);
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 is not available", ex);
+        }
     }
 
     /**
