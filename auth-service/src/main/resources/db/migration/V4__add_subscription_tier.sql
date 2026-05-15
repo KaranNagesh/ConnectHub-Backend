@@ -1,0 +1,2 @@
+ALTER TABLE users
+ADD COLUMN subscription_tier VARCHAR(20) DEFAULT 'FREE' NOT NULL;
