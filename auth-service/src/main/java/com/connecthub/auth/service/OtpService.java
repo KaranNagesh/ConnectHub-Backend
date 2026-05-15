@@ -79,6 +79,7 @@ public class OtpService {
      * @return the generated OTP string (returned so the caller can pass it to the email/SMS sender)
      */
     public String generateAndStore(String purpose, String email, int ttlMinutes) {
+        email = normalizeIdentifier(email);
         String otp = String.format("%06d", RANDOM.nextInt(999999));
         String key = OTP_PREFIX + purpose + ":" + email;
         redis.opsForValue().set(key, otp, ttlMinutes, TimeUnit.MINUTES);
@@ -108,6 +109,7 @@ public class OtpService {
      * @return true if the code matches and hasn't been used or exceeded attempts
      */
     public boolean verify(String purpose, String email, String otp) {
+        email = normalizeIdentifier(email);
         String attemptsKey = ATTEMPTS_PREFIX + purpose + ":" + email;
         String countStr = redis.opsForValue().get(attemptsKey);
         int attempts = countStr != null ? Integer.parseInt(countStr) : 0;
@@ -142,6 +144,7 @@ public class OtpService {
      * The presence of the key (regardless of its value) means the user must wait.
      */
     public boolean isOnCooldown(String purpose, String email) {
+        email = normalizeIdentifier(email);
         return Boolean.TRUE.equals(redis.hasKey(COOLDOWN_PREFIX + purpose + ":" + email));
     }
 
@@ -150,6 +153,7 @@ public class OtpService {
      * When the TTL expires, Redis automatically removes the key, ending the cooldown.
      */
     public void setCooldown(String purpose, String email, int seconds) {
+        email = normalizeIdentifier(email);
         redis.opsForValue().set(COOLDOWN_PREFIX + purpose + ":" + email, "1", seconds, TimeUnit.SECONDS);
     }
 
@@ -159,8 +163,15 @@ public class OtpService {
      * display a "Resend in Xs" countdown.
      */
     public long getCooldownRemaining(String purpose, String email) {
+        email = normalizeIdentifier(email);
         Long ttl = redis.getExpire(COOLDOWN_PREFIX + purpose + ":" + email, TimeUnit.SECONDS);
         return ttl != null && ttl > 0 ? ttl : 0;
+    }
+
+    private String normalizeIdentifier(String identifier) {
+        if (identifier == null) return null;
+        String normalized = identifier.trim();
+        return normalized.contains("@") ? normalized.toLowerCase() : normalized;
     }
 
     /**

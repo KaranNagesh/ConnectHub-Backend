@@ -44,6 +44,12 @@ class OtpServiceTest {
     }
 
     @Test
+    void generateAndStore_emailIdentifier_normalizesCaseAndWhitespace() {
+        String otp = otpService.generateAndStore("register", "  A@B.COM  ", 5);
+        verify(valueOps).set(eq("otp:register:a@b.com"), eq(otp), eq(5L), eq(TimeUnit.MINUTES));
+    }
+
+    @Test
     void generateAndStore_phoneIdentifier_doesNotThrow() {
         String otp = otpService.generateAndStore("phonelogin", "+919399934525", 5);
 
@@ -68,6 +74,14 @@ class OtpServiceTest {
         when(valueOps.increment("otp:attempts:register:a@b.com")).thenReturn(1L);
         when(valueOps.get("otp:register:a@b.com")).thenReturn("123456");
         assertTrue(otpService.verify("register", "a@b.com", "123456"));
+    }
+
+    @Test
+    void verify_emailIdentifier_normalizesCaseAndWhitespace() {
+        when(valueOps.get("otp:attempts:register:a@b.com")).thenReturn(null);
+        when(valueOps.increment("otp:attempts:register:a@b.com")).thenReturn(1L);
+        when(valueOps.get("otp:register:a@b.com")).thenReturn("123456");
+        assertTrue(otpService.verify("register", "  A@B.COM  ", "123456"));
     }
 
     @Test

@@ -104,7 +104,8 @@ public class AuthServiceImpl implements AuthService {
      */
     @Override
     public ApiResponse<String> register(RegisterRequest req) {
-        if (userRepository.existsByEmail(req.getEmail()))
+        String email = normalizeEmail(req.getEmail());
+        if (userRepository.existsByEmail(email))
             throw new DuplicateResourceException("Email already registered");
         if (userRepository.existsByUsername(req.getUsername()))
             throw new DuplicateResourceException("Username already taken");
@@ -113,19 +114,19 @@ public class AuthServiceImpl implements AuthService {
             throw new DuplicateResourceException("Phone number already registered");
 
         User user = User.builder()
-                .username(req.getUsername()).email(req.getEmail())
+                .username(req.getUsername()).email(email)
                 .passwordHash(passwordEncoder.encode(req.getPassword()))
                 .fullName(req.getFullName()).phoneNumber(req.getPhoneNumber())
                 .emailVerified(false).phoneVerified(false)
                 .build();
         userRepository.save(user);
 
-        String otp = otpService.generateAndStore("register", req.getEmail(), 5);
-        otpService.setCooldown("register", req.getEmail(), 60);
-        emailPublisher.sendOtpEmail(req.getEmail(), otp, "registration");
+        String otp = otpService.generateAndStore("register", email, 5);
+        otpService.setCooldown("register", email, 60);
+        emailPublisher.sendOtpEmail(email, otp, "registration");
 
         log.info("User registered successfully; verification OTP sent: {}", req.getUsername());
-        return ApiResponse.ok("Registration successful. Please verify your email with the OTP we sent.", req.getEmail());
+        return ApiResponse.ok("Registration successful. Please verify your email with the OTP we sent.", email);
     }
 
     /**
@@ -137,11 +138,12 @@ public class AuthServiceImpl implements AuthService {
      */
     @Override
     public AuthResponse verifyRegistrationOtp(OtpVerifyRequest req) {
-        boolean isE2eTestUser = req.getEmail() != null && req.getEmail().endsWith("@test.com") && "000000".equals(req.getOtp());
-        if (!isE2eTestUser && !otpService.verify("register", req.getEmail(), req.getOtp()))
+        String email = normalizeEmail(req.getEmail());
+        boolean isE2eTestUser = email != null && email.endsWith("@test.com") && "000000".equals(req.getOtp());
+        if (!isE2eTestUser && !otpService.verify("register", email, req.getOtp()))
             throw new BadRequestException("Invalid or expired OTP. Max 5 attempts allowed.");
 
-        User user = userRepository.findByEmail(req.getEmail())
+        User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
         user.setEmailVerified(true);
         userRepository.save(user);
@@ -158,6 +160,7 @@ public class AuthServiceImpl implements AuthService {
      */
     @Override
     public ApiResponse<Void> resendRegistrationOtp(String email) {
+        email = normalizeEmail(email);
         if (otpService.isOnCooldown("register", email)) {
             long remaining = otpService.getCooldownRemaining("register", email);
             return ApiResponse.<Void>builder().success(false)
@@ -232,7 +235,8 @@ public class AuthServiceImpl implements AuthService {
     public AuthResponse login(LoginRequest req) {
         User user = null;
         if (req.getEmail() != null && !req.getEmail().isBlank()) {
-            user = userRepository.findByEmail(req.getEmail()).orElse(null);
+            String email = normalizeEmail(req.getEmail());
+            user = userRepository.findByEmail(email).orElse(null);
             if (user == null) {
                 user = userRepository.findByUsername(req.getEmail()).orElse(null);
             }
@@ -298,7 +302,7 @@ public class AuthServiceImpl implements AuthService {
      */
     @Override
     public ApiResponse<Void> requestEmailLoginOtp(EmailLoginOtpRequest request) {
-        String email = request.getEmail();
+        String email = normalizeEmail(request.getEmail());
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new ResourceNotFoundException("No account found with this email"));
         if (!user.isActive()) throw new UnauthorizedException("Account is suspended");
@@ -323,10 +327,11 @@ public class AuthServiceImpl implements AuthService {
      */
     @Override
     public AuthResponse loginWithEmailOtp(OtpVerifyRequest request) {
-        if (!otpService.verify("emaillogin", request.getEmail(), request.getOtp()))
+        String email = normalizeEmail(request.getEmail());
+        if (!otpService.verify("emaillogin", email, request.getOtp()))
             throw new BadRequestException("Invalid or expired OTP");
 
-        User user = userRepository.findByEmail(request.getEmail())
+        User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
         if (!user.isActive()) throw new UnauthorizedException("Account is suspended");
 
@@ -437,12 +442,13 @@ public class AuthServiceImpl implements AuthService {
      */
     @Override
     public ApiResponse<Void> forgotPassword(ForgotPasswordRequest req) {
-        userRepository.findByEmail(req.getEmail()).ifPresent(user -> {
+        String email = normalizeEmail(req.getEmail());
+        userRepository.findByEmail(email).ifPresent(user -> {
             if (!"LOCAL".equals(user.getProvider())) return;
-            if (!otpService.isOnCooldown("reset", req.getEmail())) {
-                String otp = otpService.generateAndStore("reset", req.getEmail(), 10);
-                otpService.setCooldown("reset", req.getEmail(), 60);
-                emailPublisher.sendOtpEmail(req.getEmail(), otp, "password_reset");
+            if (!otpService.isOnCooldown("reset", email)) {
+                String otp = otpService.generateAndStore("reset", email, 10);
+                otpService.setCooldown("reset", email, 60);
+                emailPublisher.sendOtpEmail(email, otp, "password_reset");
             }
         });
         return ApiResponse.ok("If an account with this email exists, we have sent a reset code.");
@@ -456,9 +462,10 @@ public class AuthServiceImpl implements AuthService {
      */
     @Override
     public ApiResponse<String> verifyResetOtp(OtpVerifyRequest req) {
-        if (!otpService.verify("reset", req.getEmail(), req.getOtp()))
+        String email = normalizeEmail(req.getEmail());
+        if (!otpService.verify("reset", email, req.getOtp()))
             throw new BadRequestException("Invalid or expired OTP");
-        User user = userRepository.findByEmail(req.getEmail())
+        User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
         String resetToken = jwtUtil.generateResetToken(user.getUserId());
         return ApiResponse.ok("OTP verified. Use the reset token to set a new password.", resetToken);
@@ -711,5 +718,9 @@ public class AuthServiceImpl implements AuthService {
                 .filter(User::isPhoneVerified)
                 .findFirst()
                 .or(() -> users.stream().findFirst());
+    }
+
+    private String normalizeEmail(String email) {
+        return email == null ? null : email.trim().toLowerCase();
     }
 }

@@ -83,6 +83,25 @@ class AuthServiceImplTest {
     }
 
     @Test
+    void register_normalizesEmailBeforeSavingAndSendingOtp() {
+        RegisterRequest req = new RegisterRequest();
+        req.setUsername("newuser");
+        req.setEmail("  New@Example.COM  ");
+        req.setPassword("Test@1234");
+        when(userRepository.existsByEmail("new@example.com")).thenReturn(false);
+        when(userRepository.existsByUsername(any())).thenReturn(false);
+        when(passwordEncoder.encode(any())).thenReturn("encoded");
+        when(otpService.generateAndStore("register", "new@example.com", 5)).thenReturn("123456");
+        when(userRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        ApiResponse<String> resp = authService.register(req);
+
+        assertEquals("new@example.com", resp.getData());
+        verify(userRepository).save(argThat(user -> "new@example.com".equals(user.getEmail())));
+        verify(emailPublisher).sendOtpEmail("new@example.com", "123456", "registration");
+    }
+
+    @Test
     void register_duplicateEmail_throws() {
         RegisterRequest req = new RegisterRequest();
         req.setEmail("dup@test.com");
@@ -122,6 +141,24 @@ class AuthServiceImplTest {
 
         assertNotNull(resp.getAccessToken());
         assertTrue(testUser.isEmailVerified());
+    }
+
+    @Test
+    void verifyRegistrationOtp_normalizesEmailBeforeVerifying() {
+        OtpVerifyRequest req = new OtpVerifyRequest();
+        req.setEmail("  Test@Example.COM  ");
+        req.setOtp("123456");
+        testUser.setEmailVerified(false);
+        when(otpService.verify("register", "test@example.com", "123456")).thenReturn(true);
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(testUser));
+        when(userRepository.save(any())).thenReturn(testUser);
+        when(jwtUtil.generateAccessToken(any())).thenReturn("at");
+        when(jwtUtil.generateRefreshToken(any())).thenReturn("rt");
+
+        AuthResponse resp = authService.verifyRegistrationOtp(req);
+
+        assertNotNull(resp.getAccessToken());
+        verify(userRepository).findByEmail("test@example.com");
     }
 
     @Test
