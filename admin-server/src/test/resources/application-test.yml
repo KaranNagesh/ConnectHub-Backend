@@ -1,0 +1,21 @@
+spring:
+  boot:
+    admin:
+      client:
+        enabled: false  # Don't try to register with admin server during tests
+  security:
+    user:
+      name: test-admin
+      password: test-password
+
+eureka:
+  client:
+    enabled: false       # Disable Eureka client during tests
+    register-with-eureka: false
+    fetch-registry: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
