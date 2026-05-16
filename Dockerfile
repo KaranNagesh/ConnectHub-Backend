@@ -5,6 +5,8 @@ FROM maven:3.9.9-eclipse-temurin-17 AS build
 ARG SERVICE_NAME
 WORKDIR /workspace
 
+RUN test -n "${SERVICE_NAME}" || (echo "SERVICE_NAME build arg is required" && exit 1)
+
 COPY pom.xml ./
 COPY service-registry/pom.xml service-registry/pom.xml
 COPY api-gateway/pom.xml api-gateway/pom.xml
@@ -24,18 +26,18 @@ RUN --mount=type=cache,target=/root/.m2,sharing=locked \
 
 COPY . .
 RUN --mount=type=cache,target=/root/.m2,sharing=locked \
-    mvn -B -pl "${SERVICE_NAME}" -am package -DskipTests -Djacoco.skip.check=true \
-    && cp "${SERVICE_NAME}"/target/*.jar /application.jar
+    mvn -B -pl "${SERVICE_NAME}" -am package -DskipTests -Djacoco.skip.check=true
 
 FROM eclipse-temurin:17-jre-alpine
 
+ARG SERVICE_NAME
 WORKDIR /app
 RUN addgroup -S connecthub && adduser -S connecthub -G connecthub
 
-COPY --from=build /application.jar /app/application.jar
+COPY --from=build /workspace/${SERVICE_NAME}/target/*.jar /app/app.jar
 RUN chown -R connecthub:connecthub /app
 
 USER connecthub
 EXPOSE 8080 8081 8082 8083 8084 8085 8086 8087 8088 8089 8761
 
-ENTRYPOINT ["sh", "-c", "java ${JAVA_OPTS:-} -jar /app/application.jar"]
+ENTRYPOINT ["sh", "-c", "java ${JAVA_OPTS:-} -jar /app/app.jar"]

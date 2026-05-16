@@ -1,72 +1,436 @@
+name: connecthub-backend
+
+x-common-backend-env: &common-backend-env
+  SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+  MYSQL_HOST: mysql
+  MYSQL_USER: ${MYSQL_USER:-root}
+  MYSQL_PASSWORD: ${MYSQL_PASSWORD:-connecthub-root-password}
+  REDIS_HOST: redis
+  REDIS_PORT: 6379
+  EUREKA_HOST: service-registry
+  EUREKA_PORT: 8761
+  KAFKA_BROKERS: kafka:29092
+  KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+  ADMIN_SERVER_HOST: admin-server
+  ADMIN_SERVER_PORT: 8089
+  ADMIN_USER: ${ADMIN_USER:-admin}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin_password}
+  JWT_SECRET: ${JWT_SECRET:-dev-only-connecthub-jwt-secret-change-me-please}
+  GATEWAY_URL: ${GATEWAY_URL:-http://localhost:8080}
+  FRONTEND_URL: ${FRONTEND_URL:-http://localhost:4200}
+  GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+  GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+  GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+  GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+  AWS_S3_BUCKET: ${AWS_S3_BUCKET:-connecthub-media-b}
+  AWS_REGION: ${AWS_REGION:-ap-south-1}
+  MAIL_HOST: ${MAIL_HOST:-smtp.gmail.com}
+  MAIL_PORT: ${MAIL_PORT:-587}
+  MAIL_USERNAME: ${MAIL_USERNAME:-}
+  MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+  TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+  TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+  TWILIO_FROM_NUMBER: ${TWILIO_FROM_NUMBER:-}
+  FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
+  FIREBASE_CLIENT_EMAIL: ${FIREBASE_CLIENT_EMAIL:-}
+  FIREBASE_PRIVATE_KEY: ${FIREBASE_PRIVATE_KEY:-}
+  RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
+  RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
+  RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-}
+  RAZORPAY_PRO_PLAN_ID: ${RAZORPAY_PRO_PLAN_ID:-}
+  RAZORPAY_PRO_PRICE: ${RAZORPAY_PRO_PRICE:-199}
+  JAVA_OPTS: ${JAVA_OPTS:--XX:MaxRAMPercentage=75.0 -XX:+UseContainerSupport}
+
+x-spring-healthcheck: &spring-healthcheck
+  interval: 30s
+  timeout: 5s
+  start_period: 90s
+  retries: 5
+
+x-stateful-depends-on: &stateful-depends-on
+  mysql:
+    condition: service_healthy
+  redis:
+    condition: service_healthy
+  kafka:
+    condition: service_healthy
+  service-registry:
+    condition: service_healthy
+  admin-server:
+    condition: service_healthy
+
 services:
-#  mysql:
-#    image: mysql:8.0
-#    container_name: connecthub-mysql
-#    environment:
-#      MYSQL_ROOT_PASSWORD: Karan@2004
-#      MYSQL_DATABASE: connecthub_auth
-#    ports:
-#      - "3306:3306"
-#    volumes:
-#      - mysql_data:/var/lib/mysql
+  mysql:
+    image: mysql:8.4
+    container_name: connecthub-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD:-connecthub-root-password}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-connecthub_auth}
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
 
   redis:
-    image: redis:alpine
+    image: redis:7-alpine
     container_name: connecthub-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
 
   zookeeper:
-    image: confluentinc/cp-zookeeper:latest
+    image: confluentinc/cp-zookeeper:7.5.0
     container_name: connecthub-zookeeper
+    restart: unless-stopped
+    ports:
+      - "${ZOOKEEPER_PORT:-2181}:2181"
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
+      KAFKA_HEAP_OPTS: ${ZOOKEEPER_HEAP_OPTS:--Xms64m -Xmx256m}
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
 
   kafka:
-    image: confluentinc/cp-kafka:7.4.0
+    image: confluentinc/cp-kafka:7.5.0
     container_name: connecthub-kafka
+    restart: unless-stopped
     depends_on:
-      - zookeeper
+      zookeeper:
+        condition: service_healthy
     ports:
-      - "9092:9092"
+      - "${KAFKA_PORT:-9092}:9092"
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:29092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
-      KAFKA_INTER_BROKER_LISTEN_NAME: PLAINTEXT_INTERNAL
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://${KAFKA_PUBLIC_HOST:-localhost}:${KAFKA_PORT:-9092}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_HEAP_OPTS: ${KAFKA_HEAP_OPTS:--Xms128m -Xmx384m}
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:29092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+
+  sonar-db:
+    image: postgres:15
+    container_name: connecthub-sonar-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${SONAR_DB_USER:-sonar}
+      POSTGRES_PASSWORD: ${SONAR_DB_PASSWORD:-sonar}
+      POSTGRES_DB: ${SONAR_DB_NAME:-sonar}
+    volumes:
+      - sonar_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   sonarqube:
     image: sonarqube:community
     container_name: connecthub-sonarqube
+    restart: unless-stopped
     depends_on:
-      - sonar-db
+      sonar-db:
+        condition: service_healthy
     ports:
-      - "9000:9000"
+      - "${SONARQUBE_PORT:-9000}:9000"
     environment:
-      - SONAR_JDBC_URL=jdbc:postgresql://sonar-db:5432/sonar
-      - SONAR_JDBC_USERNAME=sonar
-      - SONAR_JDBC_PASSWORD=sonar
+      SONAR_JDBC_URL: jdbc:postgresql://sonar-db:5432/${SONAR_DB_NAME:-sonar}
+      SONAR_JDBC_USERNAME: ${SONAR_DB_USER:-sonar}
+      SONAR_JDBC_PASSWORD: ${SONAR_DB_PASSWORD:-sonar}
+      SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: ${SONAR_ES_BOOTSTRAP_CHECKS_DISABLE:-true}
     volumes:
       - sonarqube_data:/opt/sonarqube/data
       - sonarqube_extensions:/opt/sonarqube/extensions
       - sonarqube_logs:/opt/sonarqube/logs
 
-  sonar-db:
-    image: postgres:15
-    container_name: connecthub-sonar-db
+  service-registry:
+    image: connecthub/service-registry:${IMAGE_TAG:-latest}
+    container_name: connecthub-service-registry
+    restart: unless-stopped
+    env_file:
+      - .env
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_NAME: service-registry
     environment:
-      - POSTGRES_USER=sonar
-      - POSTGRES_PASSWORD=sonar
-      - POSTGRES_DB=sonar
-    volumes:
-      - sonar_db_data:/var/lib/postgresql/data
+      <<: *common-backend-env
+      EUREKA_PORT: 8761
+    ports:
+      - "${EUREKA_PORT:-8761}:8761"
+    healthcheck:
+      <<: *spring-healthcheck
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8761/actuator/health | grep -q UP"]
+
+  admin-server:
+    image: connecthub/admin-server:${IMAGE_TAG:-latest}
+    container_name: connecthub-admin-server
+    restart: unless-stopped
+    env_file:
+      - .env
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_NAME: admin-server
+    depends_on:
+      service-registry:
+        condition: service_healthy
+    environment:
+      <<: *common-backend-env
+      ADMIN_SERVER_PORT: 8089
+    ports:
+      - "${ADMIN_SERVER_PORT:-8089}:8089"
+    healthcheck:
+      <<: *spring-healthcheck
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8089/actuator/health | grep -q UP"]
+
+  api-gateway:
+    image: connecthub/api-gateway:${IMAGE_TAG:-latest}
+    container_name: connecthub-api-gateway
+    restart: unless-stopped
+    env_file:
+      - .env
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_NAME: api-gateway
+    depends_on:
+      redis:
+        condition: service_healthy
+      service-registry:
+        condition: service_healthy
+      admin-server:
+        condition: service_healthy
+    environment:
+      <<: *common-backend-env
+      GATEWAY_PORT: 8080
+    ports:
+      - "${GATEWAY_PORT:-8080}:8080"
+    healthcheck:
+      <<: *spring-healthcheck
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health | grep -q UP"]
+
+  auth-service:
+    image: connecthub/auth-service:${IMAGE_TAG:-latest}
+    container_name: connecthub-auth-service
+    restart: unless-stopped
+    env_file:
+      - .env
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_NAME: auth-service
+    depends_on: *stateful-depends-on
+    environment:
+      <<: *common-backend-env
+      AUTH_SERVICE_PORT: 8081
+    ports:
+      - "${AUTH_SERVICE_PORT:-8081}:8081"
+    healthcheck:
+      <<: *spring-healthcheck
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/actuator/health | grep -q UP"]
+
+  room-service:
+    image: connecthub/room-service:${IMAGE_TAG:-latest}
+    container_name: connecthub-room-service
+    restart: unless-stopped
+    env_file:
+      - .env
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_NAME: room-service
+    depends_on: *stateful-depends-on
+    environment:
+      <<: *common-backend-env
+      ROOM_SERVICE_PORT: 8082
+    ports:
+      - "${ROOM_SERVICE_PORT:-8082}:8082"
+    healthcheck:
+      <<: *spring-healthcheck
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8082/actuator/health | grep -q UP"]
+
+  message-service:
+    image: connecthub/message-service:${IMAGE_TAG:-latest}
+    container_name: connecthub-message-service
+    restart: unless-stopped
+    env_file:
+      - .env
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_NAME: message-service
+    depends_on: *stateful-depends-on
+    environment:
+      <<: *common-backend-env
+      MESSAGE_SERVICE_PORT: 8083
+    ports:
+      - "${MESSAGE_SERVICE_PORT:-8083}:8083"
+    healthcheck:
+      <<: *spring-healthcheck
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8083/actuator/health | grep -q UP"]
+
+  media-service:
+    image: connecthub/media-service:${IMAGE_TAG:-latest}
+    container_name: connecthub-media-service
+    restart: unless-stopped
+    env_file:
+      - .env
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_NAME: media-service
+    depends_on: *stateful-depends-on
+    environment:
+      <<: *common-backend-env
+      MEDIA_SERVICE_PORT: 8088
+    ports:
+      - "${MEDIA_SERVICE_PORT:-8088}:8088"
+    healthcheck:
+      <<: *spring-healthcheck
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8088/actuator/health | grep -q UP"]
+
+  notification-service:
+    image: connecthub/notification-service:${IMAGE_TAG:-latest}
+    container_name: connecthub-notification-service
+    restart: unless-stopped
+    env_file:
+      - .env
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_NAME: notification-service
+    depends_on: *stateful-depends-on
+    environment:
+      <<: *common-backend-env
+      NOTIFICATION_SERVICE_PORT: 8084
+    ports:
+      - "${NOTIFICATION_SERVICE_PORT:-8084}:8084"
+    healthcheck:
+      <<: *spring-healthcheck
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8084/actuator/health | grep -q UP"]
+
+  payment-service:
+    image: connecthub/payment-service:${IMAGE_TAG:-latest}
+    container_name: connecthub-payment-service
+    restart: unless-stopped
+    env_file:
+      - .env
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_NAME: payment-service
+    depends_on: *stateful-depends-on
+    environment:
+      <<: *common-backend-env
+      PAYMENT_SERVICE_PORT: 8085
+    ports:
+      - "${PAYMENT_SERVICE_PORT:-8085}:8085"
+    healthcheck:
+      <<: *spring-healthcheck
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8085/actuator/health | grep -q UP"]
+
+  presence-service:
+    image: connecthub/presence-service:${IMAGE_TAG:-latest}
+    container_name: connecthub-presence-service
+    restart: unless-stopped
+    env_file:
+      - .env
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_NAME: presence-service
+    depends_on:
+      redis:
+        condition: service_healthy
+      service-registry:
+        condition: service_healthy
+      admin-server:
+        condition: service_healthy
+    environment:
+      <<: *common-backend-env
+      PRESENCE_SERVICE_PORT: 8086
+    ports:
+      - "${PRESENCE_SERVICE_PORT:-8086}:8086"
+    healthcheck:
+      <<: *spring-healthcheck
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8086/actuator/health | grep -q UP"]
+
+  websocket-service:
+    image: connecthub/websocket-service:${IMAGE_TAG:-latest}
+    container_name: connecthub-websocket-service
+    restart: unless-stopped
+    env_file:
+      - .env
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_NAME: websocket-service
+    depends_on:
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      service-registry:
+        condition: service_healthy
+      admin-server:
+        condition: service_healthy
+    environment:
+      <<: *common-backend-env
+      WEBSOCKET_SERVICE_PORT: 8087
+    ports:
+      - "${WEBSOCKET_SERVICE_PORT:-8087}:8087"
+    healthcheck:
+      <<: *spring-healthcheck
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8087/actuator/health | grep -q UP"]
 
 volumes:
   mysql_data:
+  redis_data:
+  sonar_db_data:
   sonarqube_data:
   sonarqube_extensions:
   sonarqube_logs:
-  sonar_db_data:
