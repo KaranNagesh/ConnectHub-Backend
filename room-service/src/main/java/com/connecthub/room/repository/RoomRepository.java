@@ -5,10 +5,12 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 public interface RoomRepository extends JpaRepository<Room, String> {
     Optional<Room> findByRoomId(String roomId);
+    Optional<Room> findByDmKey(String dmKey);
 
     @Query("""
         SELECT r
@@ -27,8 +29,9 @@ public interface RoomRepository extends JpaRepository<Room, String> {
               FROM RoomMember rm3
               WHERE rm3.roomId = r.roomId
           ) = 2
+        ORDER BY r.createdAt ASC
         """)
-    Optional<Room> findDirectMessageRoom(@Param("firstUserId") int firstUserId, @Param("secondUserId") int secondUserId);
+    List<Room> findDirectMessageRooms(@Param("firstUserId") int firstUserId, @Param("secondUserId") int secondUserId);
 
     long countByCreatedByIdAndType(int createdById, String type);
     long countByType(String type);

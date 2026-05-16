@@ -113,10 +113,7 @@ public class RoomService {
         }
 
         if (ROOM_TYPE_DM.equals(roomType)) {
-            Optional<Room> existingRoom = roomRepo.findDirectMessageRoom(creatorId, memberIds.get(0));
-            if (existingRoom.isPresent()) {
-                return existingRoom.get();
-            }
+            return createDirectMessageRoom(creatorId, req, memberIds);
         }
 
         Room room = Room.builder().name(resolveRoomName(roomType, req.getName(), memberIds))
@@ -144,6 +141,54 @@ public class RoomService {
         }
 
         return room;
+    }
+
+    private Room createDirectMessageRoom(int creatorId, CreateRoomRequest req, List<Integer> memberIds) {
+        int otherUserId = memberIds.get(0);
+        String dmKey = directMessageKey(creatorId, otherUserId);
+
+        Optional<Room> keyedRoom = roomRepo.findByDmKey(dmKey);
+        if (keyedRoom.isPresent()) {
+            return keyedRoom.get();
+        }
+
+        List<Room> legacyRooms = roomRepo.findDirectMessageRooms(creatorId, otherUserId);
+        if (!legacyRooms.isEmpty()) {
+            Room room = legacyRooms.get(0);
+            if (room.getDmKey() == null || room.getDmKey().isBlank()) {
+                room.setDmKey(dmKey);
+                return roomRepo.save(room);
+            }
+            return room;
+        }
+
+        Room room = Room.builder().name(resolveRoomName(ROOM_TYPE_DM, req.getName(), memberIds))
+                .description(req.getDescription()).type(ROOM_TYPE_DM).createdById(creatorId)
+                .dmKey(dmKey)
+                .isPrivate(true)
+                .maxMembers(2)
+                .build();
+        room = roomRepo.save(room);
+        addMember(room.getRoomId(), creatorId, "ADMIN");
+        addMember(room.getRoomId(), otherUserId, "MEMBER");
+        log.info("Room created: {} type={} by user={}", room.getRoomId(), ROOM_TYPE_DM, creatorId);
+        publishRoomCreatedEvent(room.getRoomId(), creatorId, memberIds);
+
+        return room;
+    }
+
+    private void publishRoomCreatedEvent(String roomId, int creatorId, List<Integer> memberIds) {
+        try {
+            java.util.Map<String, Object> event = new java.util.HashMap<>();
+            event.put("roomId", roomId);
+            event.put("creatorId", creatorId);
+            java.util.List<Integer> allMemberIds = new java.util.ArrayList<>(memberIds);
+            allMemberIds.add(creatorId);
+            event.put("memberIds", allMemberIds);
+            kafkaTemplate.send("room.created", objectMapper.writeValueAsString(event));
+        } catch (Exception e) {
+            log.warn("Failed to publish room.created event", e);
+        }
     }
 
     /**
@@ -405,5 +450,11 @@ public class RoomService {
             return roomName == null || roomName.isBlank() ? "DM-" + memberIds.get(0) : roomName.trim();
         }
         return roomName.trim();
+    }
+
+    private String directMessageKey(int firstUserId, int secondUserId) {
+        int low = Math.min(firstUserId, secondUserId);
+        int high = Math.max(firstUserId, secondUserId);
+        return low + ":" + high;
     }
 }

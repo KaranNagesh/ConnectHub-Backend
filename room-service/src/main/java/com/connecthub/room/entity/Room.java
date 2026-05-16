@@ -15,6 +15,7 @@ public class Room {
     @Column(nullable = false, length = 10) private String type;
     @Column(nullable = false) private Integer createdById;
     @Column(length = 500) private String avatarUrl;
+    @Column(name = "dm_key", length = 50, unique = true) private String dmKey;
     @Column(nullable = false) @Builder.Default private boolean isPrivate = false;
     @Builder.Default private int maxMembers = 500;
     private LocalDateTime lastMessageAt;

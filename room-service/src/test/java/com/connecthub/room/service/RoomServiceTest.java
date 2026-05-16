@@ -5,11 +5,13 @@ import com.connecthub.room.dto.UpdateRoomRequest;
 import com.connecthub.room.entity.*;
 import com.connecthub.room.exception.*;
 import com.connecthub.room.repository.*;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.kafka.core.KafkaTemplate;
 
 import java.util.*;
 
@@ -23,6 +25,8 @@ class RoomServiceTest {
     @Mock RoomRepository roomRepo;
     @Mock RoomMemberRepository memberRepo;
     @Mock RoomCacheService cacheService;
+    @Mock KafkaTemplate<String, Object> kafkaTemplate;
+    @Mock ObjectMapper objectMapper;
     @InjectMocks RoomService svc;
 
     // ── createRoom ───────────────────────────────────────────────────────────
@@ -51,7 +55,8 @@ class RoomServiceTest {
         CreateRoomRequest req = new CreateRoomRequest();
         req.setType("DM"); req.setMemberIds(List.of(2));
         Room saved = Room.builder().roomId("dm1").type("DM").createdById(1).maxMembers(2).build();
-        when(roomRepo.findDirectMessageRoom(1, 2)).thenReturn(Optional.empty());
+        when(roomRepo.findByDmKey("1:2")).thenReturn(Optional.empty());
+        when(roomRepo.findDirectMessageRooms(1, 2)).thenReturn(List.of());
         when(roomRepo.save(any())).thenReturn(saved);
         when(memberRepo.existsByRoomIdAndUserId(any(), anyInt())).thenReturn(false);
         when(memberRepo.countByRoomId(any())).thenReturn(0);
@@ -111,18 +116,36 @@ class RoomServiceTest {
     }
 
     @Test
-    void createDM_returnsExistingRoomWhenPresent() {
+    void createDM_returnsExistingRoomByDmKeyWhenPresent() {
         CreateRoomRequest req = new CreateRoomRequest();
         req.setType("dm");
         req.setMemberIds(List.of(2));
-        Room existing = Room.builder().roomId("dm1").type("DM").createdById(1).maxMembers(2).build();
+        Room existing = Room.builder().roomId("dm1").type("DM").dmKey("1:2").createdById(1).maxMembers(2).build();
 
-        when(roomRepo.findDirectMessageRoom(1, 2)).thenReturn(Optional.of(existing));
+        when(roomRepo.findByDmKey("1:2")).thenReturn(Optional.of(existing));
 
         Room result = svc.createRoom(1, req, "FREE");
 
         assertEquals("dm1", result.getRoomId());
         verify(roomRepo, never()).save(any());
+        verify(memberRepo, never()).save(any());
+    }
+
+    @Test
+    void createDM_returnsLegacyRoomAndStoresDmKeyWhenPresent() {
+        CreateRoomRequest req = new CreateRoomRequest();
+        req.setType("dm");
+        req.setMemberIds(List.of(2));
+        Room existing = Room.builder().roomId("dm1").type("DM").createdById(1).maxMembers(2).build();
+
+        when(roomRepo.findByDmKey("1:2")).thenReturn(Optional.empty());
+        when(roomRepo.findDirectMessageRooms(1, 2)).thenReturn(List.of(existing));
+        when(roomRepo.save(existing)).thenReturn(existing);
+
+        Room result = svc.createRoom(1, req, "FREE");
+
+        assertEquals("dm1", result.getRoomId());
+        assertEquals("1:2", result.getDmKey());
         verify(memberRepo, never()).save(any());
     }
 
