@@ -62,9 +62,10 @@ class AuthServiceImplTest {
         req.setUsername("newuser");
         req.setEmail("new@example.com");
         req.setPassword("Test@1234");
-        when(userRepository.existsByEmail(any())).thenReturn(false);
+        when(userRepository.findByEmail("new@example.com")).thenReturn(Optional.empty());
         when(userRepository.existsByUsername(any())).thenReturn(false);
         when(passwordEncoder.encode(any())).thenReturn("encoded");
+        when(otpService.isOnCooldown("register", "new@example.com")).thenReturn(false);
         when(otpService.generateAndStore("register", "new@example.com", 5)).thenReturn("123456");
         when(userRepository.save(any())).thenAnswer(i -> {
             User u = i.getArgument(0);
@@ -88,9 +89,10 @@ class AuthServiceImplTest {
         req.setUsername("newuser");
         req.setEmail("  New@Example.COM  ");
         req.setPassword("Test@1234");
-        when(userRepository.existsByEmail("new@example.com")).thenReturn(false);
+        when(userRepository.findByEmail("new@example.com")).thenReturn(Optional.empty());
         when(userRepository.existsByUsername(any())).thenReturn(false);
         when(passwordEncoder.encode(any())).thenReturn("encoded");
+        when(otpService.isOnCooldown("register", "new@example.com")).thenReturn(false);
         when(otpService.generateAndStore("register", "new@example.com", 5)).thenReturn("123456");
         when(userRepository.save(any())).thenAnswer(i -> i.getArgument(0));
 
@@ -107,8 +109,47 @@ class AuthServiceImplTest {
         req.setEmail("dup@test.com");
         req.setUsername("u");
         req.setPassword("P@ss1234");
-        when(userRepository.existsByEmail("dup@test.com")).thenReturn(true);
+        User verified = User.builder().email("dup@test.com").emailVerified(true).build();
+        when(userRepository.findByEmail("dup@test.com")).thenReturn(Optional.of(verified));
         assertThrows(DuplicateResourceException.class, () -> authService.register(req));
+    }
+
+    @Test
+    void register_existingUnverifiedEmail_resendsOtp() {
+        RegisterRequest req = new RegisterRequest();
+        req.setEmail("test@example.com");
+        req.setUsername("testuser");
+        req.setPassword("P@ss1234");
+        testUser.setEmailVerified(false);
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(testUser));
+        when(otpService.isOnCooldown("register", "test@example.com")).thenReturn(false);
+        when(otpService.generateAndStore("register", "test@example.com", 5)).thenReturn("654321");
+
+        ApiResponse<String> resp = authService.register(req);
+
+        assertTrue(resp.isSuccess());
+        assertEquals("test@example.com", resp.getData());
+        verify(emailPublisher).sendOtpEmail("test@example.com", "654321", "registration");
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    void register_existingUnverifiedEmailOnCooldown_returnsSuccessWithoutResending() {
+        RegisterRequest req = new RegisterRequest();
+        req.setEmail("test@example.com");
+        req.setUsername("testuser");
+        req.setPassword("P@ss1234");
+        testUser.setEmailVerified(false);
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(testUser));
+        when(otpService.isOnCooldown("register", "test@example.com")).thenReturn(true);
+        when(otpService.getCooldownRemaining("register", "test@example.com")).thenReturn(30L);
+
+        ApiResponse<String> resp = authService.register(req);
+
+        assertTrue(resp.isSuccess());
+        assertEquals(30, resp.getCooldownSeconds());
+        verifyNoInteractions(emailPublisher);
+        verify(userRepository, never()).save(any());
     }
 
     @Test
@@ -117,7 +158,7 @@ class AuthServiceImplTest {
         req.setEmail("new@test.com");
         req.setUsername("taken");
         req.setPassword("P@ss1234");
-        when(userRepository.existsByEmail(any())).thenReturn(false);
+        when(userRepository.findByEmail("new@test.com")).thenReturn(Optional.empty());
         when(userRepository.existsByUsername("taken")).thenReturn(true);
         assertThrows(DuplicateResourceException.class, () -> authService.register(req));
     }

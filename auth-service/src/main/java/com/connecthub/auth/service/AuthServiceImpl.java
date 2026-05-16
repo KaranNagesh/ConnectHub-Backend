@@ -105,8 +105,13 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public ApiResponse<String> register(RegisterRequest req) {
         String email = normalizeEmail(req.getEmail());
-        if (userRepository.existsByEmail(email))
-            throw new DuplicateResourceException("Email already registered");
+        Optional<User> existingUser = userRepository.findByEmail(email);
+        if (existingUser.isPresent()) {
+            if (existingUser.get().isEmailVerified()) {
+                throw new DuplicateResourceException("Email already registered");
+            }
+            return sendRegistrationOtp(email, existingUser.get().getUsername(), true);
+        }
         if (userRepository.existsByUsername(req.getUsername()))
             throw new DuplicateResourceException("Username already taken");
         if (req.getPhoneNumber() != null && !req.getPhoneNumber().isBlank()
@@ -121,12 +126,7 @@ public class AuthServiceImpl implements AuthService {
                 .build();
         userRepository.save(user);
 
-        String otp = otpService.generateAndStore("register", email, 5);
-        otpService.setCooldown("register", email, 60);
-        emailPublisher.sendOtpEmail(email, otp, "registration");
-
-        log.info("User registered successfully; verification OTP sent: {}", req.getUsername());
-        return ApiResponse.ok("Registration successful. Please verify your email with the OTP we sent.", email);
+        return sendRegistrationOtp(email, req.getUsername(), false);
     }
 
     /**
@@ -718,6 +718,30 @@ public class AuthServiceImpl implements AuthService {
                 .filter(User::isPhoneVerified)
                 .findFirst()
                 .or(() -> users.stream().findFirst());
+    }
+
+    private ApiResponse<String> sendRegistrationOtp(String email, String username, boolean existingUnverifiedUser) {
+        if (otpService.isOnCooldown("register", email)) {
+            long remaining = otpService.getCooldownRemaining("register", email);
+            return ApiResponse.<String>builder()
+                    .success(true)
+                    .message("A verification code was already sent. Please check your email.")
+                    .data(email)
+                    .cooldownSeconds((int) remaining)
+                    .build();
+        }
+
+        String otp = otpService.generateAndStore("register", email, 5);
+        otpService.setCooldown("register", email, 60);
+        emailPublisher.sendOtpEmail(email, otp, "registration");
+
+        if (existingUnverifiedUser) {
+            log.info("Verification OTP resent for existing unverified user: {}", username);
+            return ApiResponse.ok("Verification code resent. Please verify your email.", email);
+        }
+
+        log.info("User registered successfully; verification OTP sent: {}", username);
+        return ApiResponse.ok("Registration successful. Please verify your email with the OTP we sent.", email);
     }
 
     private String normalizeEmail(String email) {
